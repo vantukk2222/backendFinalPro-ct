@@ -1,5 +1,6 @@
 # Node modules
 node_modules/
+server/firebase-service-account.json
 
 # Logs
 logs
