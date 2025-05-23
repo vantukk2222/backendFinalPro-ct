@@ -192,6 +192,10 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3001;
+app.get('/api/example', (req, res) => {
+  res.json({ message: 'Hello from the example API route!' });
+});
+
 server.listen(PORT, () => {
   console.log(`🚀 Socket server running on port ${PORT}`);
 });
