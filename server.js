@@ -39,7 +39,7 @@ async function getFcmToken(userId) {
     console.log(`Fetching FCM token for user ${userId} from Firestore...`);
     const userDoc = await db.collection('users').doc(userId).get();
     if (userDoc.exists) {
-      console.log("userDoc.data()", userDoc.data());
+      // console.log("userDoc.data()", userDoc.data());
       const token = userDoc.data().fcmToken;
       if (token) {
         userTokens.set(userId, token); // Cache lại token
@@ -109,31 +109,54 @@ io.on('connection', (socket) => {
       console.log(`➡️ ${fromUserId} → ${toUserId}: ${text} (${lang}) isFinal: ${isFinal}`);
     }
   });
-
-  // Sự kiện bắt đầu gọi nhóm - gửi push notification cho các thành viên còn lại
   socket.on('start_call', async ({ meetingId, fromUserId, memberIds }) => {
+    console.log('start_call', { meetingId, fromUserId, memberIds });
     if (!Array.isArray(memberIds)) {
       console.warn('start_call memberIds is not array:', memberIds);
       return;
     }
 
+    // Lấy thông tin cuộc gọi từ Firestore
+    const meetingRef = db.collection('meetings').doc(meetingId);
+    const meetingDoc = await meetingRef.get();
+
+    if (!meetingDoc.exists) {
+      console.warn('Meeting not found:', meetingId);
+      return;
+    }
+
+    const currentMembers = meetingDoc.data()?.members || [];
+    console.log('Current members in meeting:', currentMembers);
+
+    // Lặp qua tất cả memberIds và gửi thông báo cho những người chưa tham gia
     for (const memberId of memberIds) {
       if (!memberId) {
         console.warn('start_call found undefined memberId, skipping');
         continue;
       }
+
       if (memberId !== fromUserId) {
-        console.log(`📞 Sending push notification to ${memberId} about new group call`);
-        const token = await getFcmToken(memberId);
-        if (token) {
-          await sendPushNotification(
-            token,
-            'Cuộc gọi nhóm mới',
-            'Bạn có cuộc gọi nhóm, hãy tham gia ngay!',
-            { meetingId }
-          );
+        // Kiểm tra nếu thành viên đã tham gia cuộc gọi
+        const alreadyInCall = currentMembers.some(member => member.uid === memberId);
+
+        if (!alreadyInCall) {
+          console.log(`📞 Sending push notification to ${memberId} about new group call`);
+          
+          // Lấy token FCM của người nhận
+          const token = await getFcmToken(memberId);
+          if (token) {
+            // Gửi push notification
+            await sendPushNotification(
+              token,
+              'Cuộc gọi nhóm mới',
+              'Bạn có cuộc gọi nhóm, hãy tham gia ngay!',
+              { meetingId }
+            );
+          } else {
+            console.log(`⚠️ User ${memberId} không có token FCM`);
+          }
         } else {
-          console.log(`⚠️ User ${memberId} không có token FCM`);
+          console.log(`🟢 User ${memberId} đã tham gia cuộc gọi, không gửi thông báo`);
         }
       }
     }
