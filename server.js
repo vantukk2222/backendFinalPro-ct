@@ -75,24 +75,8 @@ async function getFcmToken(userId) {
  * @param {Object} data 
  */
 async function sendPushNotification(token, title, body, data = {}) {
-  const message = {
-    notification: {
-      title,
-      body,
-    },
-    android: {
-      notification: {
-        sound: 'ringtone',
-        channelId: 'default',
-      },
-    },
-    apns: {
-      payload: {
-        aps: {
-          sound: 'ringtone.mp3',
-        },
-      },
-    },
+ const message = {
+    notification: { title, body },
     data,
     token,
   };
