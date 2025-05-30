@@ -79,12 +79,11 @@ async function sendPushNotification(token, title, body, data = {}) {
     notification: {
       title,
       body,
-      sound: 'ringtone.mp3', // Tên file âm thanh
     },
     android: {
       notification: {
-        sound: 'ringtone.mp3',
-        channelId: 'default', // Rất quan trọng trên Android 8+
+        sound: 'ringtone',
+        channelId: 'default',
       },
     },
     apns: {
