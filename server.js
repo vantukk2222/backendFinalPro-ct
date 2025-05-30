@@ -76,7 +76,24 @@ async function getFcmToken(userId) {
  */
 async function sendPushNotification(token, title, body, data = {}) {
   const message = {
-    notification: { title, body },
+    notification: {
+      title,
+      body,
+      sound: 'ringtone.mp3', // Tên file âm thanh
+    },
+    android: {
+      notification: {
+        sound: 'ringtone.mp3',
+        channelId: 'default', // Rất quan trọng trên Android 8+
+      },
+    },
+    apns: {
+      payload: {
+        aps: {
+          sound: 'ringtone.mp3',
+        },
+      },
+    },
     data,
     token,
   };
