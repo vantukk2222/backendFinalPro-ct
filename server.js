@@ -1,11 +1,11 @@
-// server.js
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const admin = require('firebase-admin');
-// const serviceAccount = require('./server/firebase-service-account.json'); // Đường dẫn tới file JSON service account
 require('dotenv').config();
+
+// Firebase Admin SDK configuration
 const serviceAccount = {
   type: process.env.FIREBASE_TYPE,
   project_id: process.env.FIREBASE_PROJECT_ID,
@@ -20,44 +20,46 @@ const serviceAccount = {
   universe_domain: process.env.FIREBASE_UNIVERSE_DOMAIN,
 };
 
+// Initialize Express app
 const app = express();
 app.use(cors());
+app.use(express.json());
 
-// Khởi tạo Firebase Admin SDK
+// Initialize Firebase Admin SDK
 admin.initializeApp({
-
   credential: admin.credential.cert(serviceAccount),
 });
 
 const db = admin.firestore();
 
+// Create HTTP server and Socket.IO
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*' },
 });
 
-// Map lưu socketId theo userId
-const userSockets = new Map();
-// Map lưu token FCM theo userId
-const userTokens = new Map();
+// Maps for user management
+const userSockets = new Map(); // userId -> socketId
+const userTokens = new Map();  // userId -> fcmToken
+
+// ===== UTILITY FUNCTIONS =====
 
 /**
- * Lấy token FCM từ cache (userTokens) hoặc Firestore nếu chưa có trong cache
- * @param {string} userId 
- * @returns {Promise<string|null>} fcmToken hoặc null nếu không tìm thấy
+ * Get FCM token from cache or Firestore
  */
 async function getFcmToken(userId) {
   if (userTokens.has(userId)) {
     return userTokens.get(userId);
   }
+  
   try {
     console.log(`Fetching FCM token for user ${userId} from Firestore...`);
     const userDoc = await db.collection('users').doc(userId).get();
     if (userDoc.exists) {
-      // console.log("userDoc.data()", userDoc.data());
-      const token = userDoc.data().fcmToken;
+      const userData = userDoc.data();
+      const token = userData?.fcmToken;
       if (token) {
-        userTokens.set(userId, token); // Cache lại token
+        userTokens.set(userId, token);
         return token;
       }
     }
@@ -68,55 +70,471 @@ async function getFcmToken(userId) {
 }
 
 /**
- * Gửi thông báo đẩy qua FCM
- * @param {string} token 
- * @param {string} title 
- * @param {string} body 
- * @param {Object} data 
+ * Get user info from Firestore
  */
-async function sendPushNotification(token, title, body, data = {}) {
- const message = {
-    notification: { title, body },
-    data,
-    token,
-  };
-
+async function getUserInfo(userId) {
   try {
-    const response = await admin.messaging().send(message);
-    console.log('Successfully sent message:', response);
+    const userDoc = await db.collection('users').doc(userId).get();
+    if (userDoc.exists) {
+      return userDoc.data();
+    }
   } catch (error) {
-    console.error('Error sending message:', error);
+    console.error(`Error fetching user info for ${userId}:`, error);
+  }
+  return null;
+}
+
+/**
+ * Check if recipient has muted the sender
+ */
+async function isRecipientMutedSender(recipientId, senderId) {
+  try {
+    const recipientDoc = await db.collection('users').doc(recipientId).get();
+    if (recipientDoc.exists) {
+      const userData = recipientDoc.data();
+      const blockedUsers = userData?.blockedUsers || [];
+      const mutedUsers = userData?.mutedUsers || [];
+      return blockedUsers.includes(senderId) || mutedUsers.includes(senderId);
+    }
+  } catch (error) {
+    console.error(`Error checking if recipient ${recipientId} muted sender ${senderId}:`, error);
+  }
+  return false;
+}
+
+// ===== NOTIFICATION HELPER FUNCTIONS =====
+
+function getChannelId(type) {
+  const channels = {
+    message: 'chat_messages',
+    call: 'voice_calls',
+    video_call: 'video_calls',
+    group_invite: 'group_invites',
+    system: 'system_notifications',
+    default: 'default_channel'
+  };
+  return channels[type] || channels.default;
+}
+
+function getPriority(type) {
+  const highPriorityTypes = ['call', 'video_call', 'emergency'];
+  return highPriorityTypes.includes(type) ? 'high' : 'normal';
+}
+
+function getVisibility(type) {
+  const privateTypes = ['message', 'call'];
+  return privateTypes.includes(type) ? 'private' : 'public';
+}
+
+function getNotificationTag(type, data) {
+  if (type === 'message' && data.chatId) {
+    return `chat_${data.chatId}`;
+  }
+  if (type === 'call' && data.meetingId) {
+    return `call_${data.meetingId}`;
+  }
+  return type;
+}
+
+function getCategory(type) {
+  const categories = {
+    message: 'MESSAGE_CATEGORY',
+    call: 'CALL_CATEGORY',
+    video_call: 'VIDEO_CALL_CATEGORY',
+    default: 'DEFAULT_CATEGORY'
+  };
+  return categories[type] || categories.default;
+}
+
+/**
+ * Remove invalid FCM token from cache and database
+ */
+async function removeInvalidToken(token, error) {
+  const isInvalidToken = error?.code === 'messaging/invalid-registration-token' ||
+                        error?.code === 'messaging/registration-token-not-registered';
+  
+  if (isInvalidToken) {
+    console.log(`🗑️ Removing invalid FCM token: ${token}`);
+    
+    for (const [userId, cachedToken] of userTokens.entries()) {
+      if (cachedToken === token) {
+        userTokens.delete(userId);
+        
+        try {
+          await db.collection('users').doc(userId).update({
+            fcmToken: admin.firestore.FieldValue.delete()
+          });
+          console.log(`🗑️ Removed invalid token from database for user: ${userId}`);
+        } catch (dbError) {
+          console.error(`Error removing token from database:`, dbError);
+        }
+        break;
+      }
+    }
   }
 }
+
+// ===== MAIN NOTIFICATION FUNCTIONS =====
+
+/**
+ * Send push notification via FCM
+ */
+async function sendNotificationsBatch(tokens, notificationData, additionalData = {}) {
+  const validTokens = Array.isArray(tokens) ? tokens : [tokens];
+  const BATCH_SIZE = 500; // FCM limit is 500 tokens per request
+  
+  console.log(`📱 Sending notifications to ${validTokens.length} tokens in batches`);
+  
+  const allResults = [];
+  let totalSuccess = 0;
+  let totalFailure = 0;
+
+  for (let i = 0; i < validTokens.length; i += BATCH_SIZE) {
+    const batch = validTokens.slice(i, i + BATCH_SIZE);
+    console.log(`📦 Processing batch ${Math.floor(i/BATCH_SIZE) + 1}: ${batch.length} tokens`);
+    
+    try {
+      const result = await sendPushNotification(batch, notificationData, additionalData);
+      allResults.push(result);
+      
+      if (result.success) {
+        totalSuccess += result.successCount || 0;
+        totalFailure += result.failureCount || 0;
+      } else {
+        totalFailure += batch.length;
+      }
+    } catch (error) {
+      console.error(`❌ Batch ${Math.floor(i/BATCH_SIZE) + 1} failed:`, error);
+      totalFailure += batch.length;
+    }
+  }
+
+  console.log(`📊 Batch results: ${totalSuccess} success, ${totalFailure} failed`);
+  return {
+    success: totalSuccess > 0,
+    totalSuccess,
+    totalFailure,
+    batches: allResults.length,
+    results: allResults
+  };
+}
+async function sendPushNotification(tokens, notificationData, additionalData = {}) {
+  const tokenArray = Array.isArray(tokens) ? tokens : [tokens];
+  const validTokens = tokenArray.filter(token => token && typeof token === 'string' && token.trim().length > 0);
+  
+  if (validTokens.length === 0) {
+    console.warn('No valid FCM tokens provided');
+    return { success: false, error: 'No valid tokens' };
+  }
+
+  const {
+    title,
+    body,
+    icon = 'ic_notification',
+    sound = 'default',
+    badge,
+    imageUrl,
+    type = 'default'
+  } = notificationData;
+
+  // Prepare data payload
+  const dataPayload = {
+    type,
+    timestamp: Date.now().toString(),
+    ...Object.fromEntries(
+      Object.entries(additionalData).map(([key, value]) => [
+        key,
+        typeof value === 'string' ? value : JSON.stringify(value)
+      ])
+    )
+  };
+
+  const notification = {
+    title,
+    body,
+    ...(imageUrl && { imageUrl })
+  };
+
+  const android = {
+    notification: {
+      icon,
+      sound,
+      channelId: getChannelId(type),
+      visibility: getVisibility(type),
+      ...(badge && { notificationCount: badge }),
+      clickAction: 'FLUTTER_NOTIFICATION_CLICK',
+      tag: getNotificationTag(type, additionalData),
+    },
+    data: dataPayload,
+    priority: getPriority(type)
+  };
+
+  const apns = {
+    payload: {
+      aps: {
+        alert: { title, body },
+        sound,
+        ...(badge && { badge }),
+        category: getCategory(type),
+        'mutable-content': 1,
+        'content-available': 1
+      }
+    },
+    fcmOptions: {
+      ...(imageUrl && { imageUrl })
+    }
+  };
+
+  if (validTokens.length > 1) {
+    // Multicast
+    const message = {
+      notification,
+      android,
+      apns,
+      data: dataPayload,
+      tokens: validTokens
+    };
+
+    try {
+      const response = await admin.messaging().sendMulticast(message);
+      console.log(`📱 Multicast notification sent: ${response.successCount}/${validTokens.length} successful`);
+      
+      if (response.failureCount > 0) {
+        response.responses.forEach((resp, idx) => {
+          if (!resp.success) {
+            console.error(`❌ Failed to send to token ${idx}:`, resp.error);
+            removeInvalidToken(validTokens[idx], resp.error);
+          }
+        });
+      }
+      
+      return {
+        success: response.successCount > 0,
+        successCount: response.successCount,
+        failureCount: response.failureCount,
+        responses: response.responses
+      };
+    } catch (error) {
+      console.error('❌ Error sending multicast notification:', error);
+      return { success: false, error: error.message };
+    }
+  } else {
+    // Single message
+    const message = {
+      notification,
+      android,
+      apns,
+      data: dataPayload,
+      token: validTokens[0]
+    };
+
+    try {
+      const response = await admin.messaging().send(message);
+      console.log(`📱 Single notification sent successfully: ${response}`);
+      return { success: true, messageId: response };
+    } catch (error) {
+      console.error('❌ Error sending single notification:', error);
+      removeInvalidToken(validTokens[0], error);
+      return { success: false, error: error.message };
+    }
+  }
+}
+
+/**
+ * Send chat message notification
+ */
+async function sendChatNotification(chatId, senderId, message, memberIds) {
+  try {
+    const senderInfo = await getUserInfo(senderId);
+    const senderName = senderInfo?.name || senderInfo?.email || 'Someone';
+    
+    // Get chat info to check muted users
+    const chatDoc = await db.collection('chats').doc(chatId).get();
+    const chatData = chatDoc.exists ? chatDoc.data() : {};
+    const chatName = chatData?.name || 'Chat';
+    const isGroup = chatData?.isGroup || false;
+    const mutedUsers = chatData?.muted || [];
+    
+    console.log(`📨 Sending chat notification for chat ${chatId}`);
+    console.log(`🔇 Muted users in chat: ${mutedUsers.join(', ')}`);
+    console.log(`👤 Sender: ${senderId}`);
+    
+    const recipientIds = memberIds.filter(id => id !== senderId);
+    console.log(`👥 Recipients: ${recipientIds.join(', ')}`);
+    
+    for (const recipientId of recipientIds) {
+      // Check if SENDER muted this chat (not recipient)
+      // Nếu sender đã mute chat, thì sender không nên gửi notification
+      if (mutedUsers.includes(recipientId)) {
+        console.log(`🔇 Sender ${senderId} has muted chat ${chatId}, skipping send notifications to  this sender`);
+        break; // Skip all recipients since sender muted the chat
+      }
+      
+      // // Check if recipient is online
+      // const isOnline = userSockets.has(recipientId);
+      // if (isOnline) {
+      //   console.log(`🟢 Recipient ${recipientId} is online, skipping push notification`);
+      //   continue;
+      // }
+      
+      // Check if recipient muted sender
+      const isMutedSender = await isRecipientMutedSender(recipientId, senderId);
+      if (isMutedSender) {
+        console.log(`🚫 Recipient ${recipientId} has muted sender ${senderId}, skipping notification`);
+        continue;
+      }
+      
+      const token = await getFcmToken(recipientId);
+      if (token) {
+        const notificationData = {
+          title: isGroup ? `${senderName} in ${chatName}` : senderName,
+          body: message.length > 100 ? `${message.substring(0, 97)}...` : message,
+          type: 'message',
+          sound: 'default'
+        };
+        
+        const additionalData = {
+          chatId,
+          senderId,
+          isGroup: isGroup.toString(),
+          chatName,
+          senderName
+        };
+        
+        console.log(`📱 Sending message notification to recipient ${recipientId}`);
+        await sendPushNotification(token, notificationData, additionalData);
+      } else {
+        console.log(`⚠️ No FCM token found for recipient ${recipientId}`);
+      }
+    }
+  } catch (error) {
+    console.error('Error sending chat notification:', error);
+  }
+}
+
+/**
+ * Send call notification
+ */
+async function sendCallNotification(meetingId, callerId, memberIds, isVideoCall = false) {
+  try {
+    const callerInfo = await getUserInfo(callerId);
+    const callerName = callerInfo?.name || callerInfo?.email || 'Someone';
+    
+    console.log(`📞 Sending call notification for meeting ${meetingId}`);
+    console.log(`👤 Caller: ${callerId}`);
+    
+    const recipientIds = memberIds.filter(id => id !== callerId);
+    console.log(`👥 Recipients: ${recipientIds.join(', ')}`);
+    
+    const tokens = [];
+    
+    for (const recipientId of recipientIds) {
+      if (mutedUsers.includes(recipientId)) {
+        console.log(`🔇 Sender ${senderId} has muted chat ${chatId}, skipping send notifications to  this sender`);
+        break; // Skip all recipients since sender muted the chat
+      }
+      // Check if recipient has muted the caller
+      const isMutedCaller = await isRecipientMutedSender(recipientId, callerId);
+      if (isMutedCaller) {
+        console.log(`🚫 Recipient ${recipientId} has muted caller ${callerId}, skipping call notification`);
+        continue;
+      }
+      
+      const token = await getFcmToken(recipientId);
+      if (token) {
+        tokens.push(token);
+      } else {
+        console.log(`⚠️ No FCM token found for recipient ${recipientId}`);
+      }
+    }
+    
+    if (tokens.length > 0) {
+      const notificationData = {
+        title: `${isVideoCall ? 'Video' : 'Voice'} Call`,
+        body: `${callerName} is calling you`,
+        type: isVideoCall ? 'video_call' : 'call',
+        sound: 'ringtone.wav'
+      };
+      
+      const additionalData = {
+        meetingId,
+        callerId,
+        callerName,
+        isVideoCall: isVideoCall.toString(),
+        action: 'incoming_call'
+      };
+      
+      console.log(`📱 Sending call notification to ${tokens.length} users`);
+      
+      if (tokens.length > 10) {
+        // Use batch sending for large groups
+        await sendNotificationsBatch(tokens, notificationData, additionalData);
+      } else {
+        // Use regular sending for small groups
+        await sendPushNotification(tokens, notificationData, additionalData);
+      }
+    } else {
+      console.log('⚠️ No valid tokens found for call notification');
+    }
+  } catch (error) {
+    console.error('Error sending call notification:', error);
+  }
+}
+
+// ===== SOCKET.IO EVENT HANDLERS =====
 
 io.on('connection', (socket) => {
   console.log('🔌 New client connected:', socket.id);
 
-  // Khi client đăng ký userId và token FCM
-  socket.on('register', async ({ userId, fcmToken,from }) => {
+  // Register user with socket and FCM token
+  socket.on('register', async ({ userId, fcmToken, from }) => {
     console.log("from: ", from);
     userSockets.set(userId, socket.id);
+    
     if (fcmToken) {
       userTokens.set(userId, fcmToken);
       console.log(`👤 Registered userId ${userId} with FCM token from client`);
-      // Cập nhật token mới lên Firestore
+      
       try {
-        await db.collection('users').doc(userId).update({ fcmToken });
+        await db.collection('users').doc(userId).update({ 
+          fcmToken,
+          lastSeen: admin.firestore.FieldValue.serverTimestamp(),
+          isOnline: true
+        });
       } catch (error) {
         console.error(`Failed to update FCM token for user ${userId}:`, error);
       }
     } else {
-      // Nếu client không gửi token, cố gắng lấy token từ Firestore
       const token = await getFcmToken(userId);
       if (token) {
-        console.log(`👤 Registered userId ${userId} with FCM token from Firestore cache`);
+        console.log(`👤 Registered userId ${userId} with FCM token from Firestore`);
       } else {
-        console.log(`⚠️ User ${userId} không có token FCM`);
+        console.log(`⚠️ User ${userId} doesn't have FCM token`);
       }
     }
   });
 
-  // Nhận sự kiện dịch thuật, gửi realtime tới user đích
+  // Handle message sending
+  socket.on('send_message', async ({ chatId, senderId, message, memberIds }) => {
+    console.log(`💬 New message in chat ${chatId} from ${senderId}`);
+    console.log(`📝 Message: ${message}`);
+    console.log(`👥 All members: ${memberIds?.join(', ')}`);
+    
+    if (memberIds && Array.isArray(memberIds)) {
+      const recipientIds = memberIds.filter(id => id !== senderId);
+      console.log(`📤 Will send notifications to: ${recipientIds.join(', ')}`);
+      
+      if (recipientIds.length > 0) {
+        await sendChatNotification(chatId, senderId, message, recipientIds);
+      } else {
+        console.log(`ℹ️ No recipients to send notifications to`);
+      }
+    } else {
+      console.warn('❌ Invalid memberIds in send_message event');
+    }
+  });
+
+  // Handle translation
   socket.on('send_translation', ({ toUserId, fromUserId, text, lang, isFinal }) => {
     const toSocketId = userSockets.get(toUserId);
     if (toSocketId) {
@@ -124,78 +542,141 @@ io.on('connection', (socket) => {
       console.log(`➡️ ${fromUserId} → ${toUserId}: ${text} (${lang}) isFinal: ${isFinal}`);
     }
   });
-  socket.on('start_call', async ({ meetingId, fromUserId, memberIds }) => {
-    console.log('start_call', { meetingId, fromUserId, memberIds });
+
+  // Handle call start
+  socket.on('start_call', async ({ meetingId, fromUserId, memberIds, isVideoCall = false }) => {
+    console.log('📞 start_call', { meetingId, fromUserId, memberIds, isVideoCall });
+    
     if (!Array.isArray(memberIds)) {
       console.warn('start_call memberIds is not array:', memberIds);
       return;
     }
 
-    // Lấy thông tin cuộc gọi từ Firestore
-    const meetingRef = db.collection('meetings').doc(meetingId);
-    const meetingDoc = await meetingRef.get();
+    try {
+      const meetingRef = db.collection('meetings').doc(meetingId);
+      const meetingDoc = await meetingRef.get();
 
-    if (!meetingDoc.exists) {
-      console.warn('Meeting not found:', meetingId);
-      return;
-    }
-
-    const currentMembers = meetingDoc.data()?.members || [];
-    console.log('Current members in meeting:', currentMembers);
-
-    // Lặp qua tất cả memberIds và gửi thông báo cho những người chưa tham gia
-    for (const memberId of memberIds) {
-      if (!memberId) {
-        console.warn('start_call found undefined memberId, skipping');
-        continue;
+      if (!meetingDoc.exists) {
+        console.warn('Meeting not found:', meetingId);
+        return;
       }
 
-      if (memberId !== fromUserId) {
-        // Kiểm tra nếu thành viên đã tham gia cuộc gọi
-        const alreadyInCall = currentMembers.some(member => member.uid === memberId);
+      const currentMembers = meetingDoc.data()?.members || [];
+      console.log('Current members in meeting:', currentMembers);
 
-        if (!alreadyInCall) {
-          console.log(`📞 Sending push notification to ${memberId} about new group call`);
-          
-          // Lấy token FCM của người nhận
-          const token = await getFcmToken(memberId);
-          if (token) {
-            // Gửi push notification
-            await sendPushNotification(
-              token,
-              'Cuộc gọi nhóm mới',
-              'Bạn có cuộc gọi nhóm, hãy tham gia ngay!',
-              { meetingId }
-            );
-          } else {
-            console.log(`⚠️ User ${memberId} không có token FCM`);
-          }
-        } else {
-          console.log(`🟢 User ${memberId} đã tham gia cuộc gọi, không gửi thông báo`);
-        }
+      const notInCallMembers = memberIds.filter(memberId => {
+        if (!memberId || memberId === fromUserId) return false;
+        return !currentMembers.some(member => member.uid === memberId);
+      });
+
+      if (notInCallMembers.length > 0) {
+        console.log(`📞 Sending call notification to: ${notInCallMembers.join(', ')}`);
+        await sendCallNotification(meetingId, fromUserId, notInCallMembers, isVideoCall);
+      } else {
+        console.log('📞 All members are already in call or no valid recipients');
       }
+    } catch (error) {
+      console.error('Error handling start_call:', error);
     }
   });
 
-
-  // Xử lý ngắt kết nối
-  socket.on('disconnect', () => {
+  // Handle disconnect
+  socket.on('disconnect', async () => {
+    let disconnectedUserId = null;
+    
     for (const [userId, sId] of userSockets.entries()) {
       if (sId === socket.id) {
         userSockets.delete(userId);
-        userTokens.delete(userId);
+        disconnectedUserId = userId;
         console.log(`❌ Disconnected ${userId} (${socket.id})`);
+        
+        try {
+          await db.collection('users').doc(userId).update({
+            isOnline: false,
+            lastSeen: admin.firestore.FieldValue.serverTimestamp()
+          });
+        } catch (error) {
+          console.error(`Error updating offline status for ${userId}:`, error);
+        }
         break;
       }
     }
   });
 });
 
-const PORT = process.env.PORT || 3001;
-app.get('/api/example', (req, res) => {
-  res.json({ message: 'Hello from the example API route!' });
+// ===== REST API ENDPOINTS =====
+
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    connectedUsers: userSockets.size 
+  });
 });
 
+// Test notification
+app.post('/api/test-notification', async (req, res) => {
+  const { userId, title, body, type = 'test' } = req.body;
+  
+  try {
+    const token = await getFcmToken(userId);
+    if (!token) {
+      return res.status(404).json({ error: 'User token not found' });
+    }
+    
+    const result = await sendPushNotification(
+      token,
+      { title, body, type },
+      { test: 'true' }
+    );
+    
+    res.json({ success: true, result });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Test message notification
+app.post('/api/test-message-notification', async (req, res) => {
+  const { chatId, senderId, message, memberIds } = req.body;
+  
+  try {
+    await sendChatNotification(chatId, senderId, message, memberIds);
+    res.json({ success: true, message: 'Message notification sent' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Debug muted users
+app.post('/api/debug-muted-users', async (req, res) => {
+  const { chatId } = req.body;
+  
+  try {
+    const chatDoc = await db.collection('chats').doc(chatId).get();
+    if (chatDoc.exists) {
+      const chatData = chatDoc.data();
+      res.json({
+        chatId,
+        members: chatData?.members || [],
+        mutedUsers: chatData?.muted || [],
+        chatName: chatData?.name || 'Unknown',
+        isGroup: chatData?.isGroup || false
+      });
+    } else {
+      res.status(404).json({ error: 'Chat not found' });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ===== START SERVER =====
+
+const PORT = process.env.PORT || 3001;
+const HOST = process.env.HOST || '192.168.1.9';
+
 server.listen(PORT, () => {
-  console.log(`🚀 Socket server running on port ${PORT}`);
+  console.log(`🚀 Socket server running on ${HOST}:${PORT}`);
 });
