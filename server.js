@@ -427,6 +427,7 @@ async function sendCallNotification(meetingId, callerId, memberIds, isVideoCall 
     console.log(`👥 Recipients: ${recipientIds.join(', ')}`);
     
     const tokens = [];
+    const mutedUsers = chatData?.muted || [];
     
     for (const recipientId of recipientIds) {
       if (mutedUsers.includes(recipientId)) {
