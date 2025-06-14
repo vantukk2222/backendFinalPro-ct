@@ -417,6 +417,8 @@ async function sendChatNotification(chatId, senderId, message, memberIds) {
  */
 async function sendCallNotification(meetingId, callerId, memberIds, isVideoCall = false) {
   try {
+    const chatDoc = await db.collection('chats').doc(meetingId).get();
+    const chatData = chatDoc.exists ? chatDoc.data() : {};
     const callerInfo = await getUserInfo(callerId);
     const callerName = callerInfo?.name || callerInfo?.email || 'Someone';
     
