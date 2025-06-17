@@ -57,7 +57,7 @@ async function getFcmToken(userId) {
     const userDoc = await db.collection('users').doc(userId).get();
     if (userDoc.exists) {
       const userData = userDoc.data();
-      const token = userData?.fcmToken;
+      const token = userData?.currentSession?.fcmToken;
       if (token) {
         userTokens.set(userId, token);
         return token;
@@ -162,6 +162,7 @@ async function removeInvalidToken(token, error) {
         
         try {
           await db.collection('users').doc(userId).update({
+            currentSession: admin.firestore.FieldValue.delete(),
             fcmToken: admin.firestore.FieldValue.delete()
           });
           console.log(`🗑️ Removed invalid token from database for user: ${userId}`);
@@ -286,36 +287,58 @@ async function sendPushNotification(tokens, notificationData, additionalData = {
   };
 
   if (validTokens.length > 1) {
-    // Multicast
-    const message = {
-      notification,
-      android,
-      apns,
-      data: dataPayload,
-      tokens: validTokens
-    };
+    // Send all notifications concurrently instead of multicast
+    console.log(`📱 Sending ${validTokens.length} notifications concurrently...`);
+    
+    const notificationPromises = validTokens.map(async (token, index) => {
+      const message = {
+        notification,
+        android,
+        apns,
+        data: dataPayload,
+        token: token
+      };
+
+      try {
+        const response = await admin.messaging().send(message);
+        console.log(`📱 Notification ${index + 1}/${validTokens.length} sent successfully`);
+        return { success: true, messageId: response, token };
+      } catch (error) {
+        console.error(`❌ Failed to send notification ${index + 1}/${validTokens.length}:`, error);
+        removeInvalidToken(token, error);
+        return { success: false, error: error.message, token };
+      }
+    });
 
     try {
-      const response = await admin.messaging().sendMulticast(message);
-      console.log(`📱 Multicast notification sent: ${response.successCount}/${validTokens.length} successful`);
+      const responses = await Promise.allSettled(notificationPromises);
       
-      if (response.failureCount > 0) {
-        response.responses.forEach((resp, idx) => {
-          if (!resp.success) {
-            console.error(`❌ Failed to send to token ${idx}:`, resp.error);
-            removeInvalidToken(validTokens[idx], resp.error);
+      let successCount = 0;
+      let failureCount = 0;
+      
+      responses.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          if (result.value.success) {
+            successCount++;
+          } else {
+            failureCount++;
           }
-        });
-      }
+        } else {
+          failureCount++;
+          console.error(`❌ Promise rejected for token ${index}:`, result.reason);
+        }
+      });
+      
+      console.log(`📊 Concurrent notifications: ${successCount} success, ${failureCount} failed`);
       
       return {
-        success: response.successCount > 0,
-        successCount: response.successCount,
-        failureCount: response.failureCount,
-        responses: response.responses
+        success: successCount > 0,
+        successCount,
+        failureCount,
+        responses: responses.map(r => r.status === 'fulfilled' ? r.value : { success: false, error: r.reason })
       };
     } catch (error) {
-      console.error('❌ Error sending multicast notification:', error);
+      console.error('❌ Error in concurrent notification sending:', error);
       return { success: false, error: error.message };
     }
   } else {
