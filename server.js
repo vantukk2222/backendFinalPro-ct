@@ -687,6 +687,7 @@ io.on('connection', (socket) => {
 
       const currentMembers = meetingDoc.data()?.members || [];
       // console.log('Current members in meeting:', currentMembers);
+      // console.log("memberIds:", memberIds);
 
       const notInCallMembers = memberIds.filter(memberId => {
         if (!memberId || memberId === fromUserId) return false;
@@ -834,6 +835,25 @@ io.on('connection', (socket) => {
   socket.on('stop_speaking', ({meetingId}) => {
     cleanupRecognizer(meetingId);
   });
+  socket.on('leave_call', ({ meetingId, user }) => {
+    if (rooms[meetingId]) {
+      rooms[meetingId].participants.delete(socket.id);
+      
+      if (activeRecognizers[meetingId]?.speakerId === socket.id) {
+        cleanupRecognizer(meetingId);
+      }
+      
+      if (rooms[meetingId].participants.size === 0) {
+        delete rooms[meetingId];
+      } else {
+        io.to(meetingId).emit('user_left', user);
+        // what is user_left 
+
+      }
+    } else {
+      console.warn(`Meeting ${meetingId} not found for user ${user.uid}`);
+    }
+  })
   // Handle disconnect
   socket.on('disconnect', async () => {
     let disconnectedUserId = null;
@@ -843,6 +863,18 @@ io.on('connection', (socket) => {
         userSockets.delete(userId);
         disconnectedUserId = userId;
         console.log(`❌ Disconnected ${userId} (${socket.id})`);
+        // remove participant has disconnected from rooms
+        // break;
+        rooms = Object.fromEntries(
+          Object.entries(rooms).map(([roomId, room]) => {
+            room.participants.delete(socket.id);
+            if (room.participants.size === 0) {
+              return [roomId, null]; // Remove empty rooms
+            }
+            return [roomId, room];
+          }
+        ));
+
         
         try {
           await db.collection('users').doc(userId).update({
