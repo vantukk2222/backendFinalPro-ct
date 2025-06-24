@@ -532,20 +532,309 @@ async function sendCallNotification(meetingId, callerId, memberIds, isVideoCall 
  */
 function getVoiceNameForLanguage(langCode) {
     const voiceMap = {
-      vi: 'vi-VN-HoaiMyNeural', // Vietnamese
-      en: 'en-US-JennyNeural', // English (US)
-      ja: 'ja-JP-NanamiNeural', // Japanese
-      ko: 'ko-KR-SunHiNeural', // Korean
-      zh: 'zh-CN-XiaoxiaoNeural', // Chinese
-      fr: 'fr-FR-DeniseNeural', // French
-      de: 'de-DE-KatjaNeural', // German
-      es: 'es-ES-ElviraNeural', // Spanish
-      af: 'af-ZA-AdriNeural', // Afrikaans
-      am: 'am-ET-MekdesNeural', // Amharic
-      ar: 'ar-AE-HamdanNeural ', // Arabic      
-    };
-    const langPrefix = langCode.split('-')[0].toLowerCase();
-    return voiceMap[langPrefix] || null;
+    // Afrikaans
+    'af-ZA': 'af-ZA-AdriNeural',
+
+    // Amharic
+    'am-ET': 'am-ET-MekdesNeural',
+
+    // Arabic
+    'ar-AE': 'ar-AE-FatimaNeural',
+    'ar-BH': 'ar-BH-AliNeural',
+    'ar-DZ': 'ar-DZ-AminaNeural',
+    'ar-EG': 'ar-EG-SalmaNeural',
+    'ar-IQ': 'ar-IQ-BasselNeural',
+    'ar-JO': 'ar-JO-SanaNeural',
+    'ar-KW': 'ar-KW-FahedNeural',
+    'ar-LB': 'ar-LB-LaylaNeural',
+    'ar-LY': 'ar-LY-ImanNeural',
+    'ar-MA': 'ar-MA-JamalNeural',
+    'ar-OM': 'ar-OM-AbdullahNeural',
+    'ar-QA': 'ar-QA-AmalNeural',
+    'ar-SA': 'ar-SA-ZariyahNeural',
+    'ar-SY': 'ar-SY-AmanyNeural',
+    'ar-TN': 'ar-TN-HediNeural',
+    'ar-YE': 'ar-YE-MaryamNeural',
+
+    // Azerbaijani
+    'az-AZ': 'az-AZ-BabekNeural',
+
+    // Bulgarian
+    'bg-BG': 'bg-BG-KalinaNeural',
+
+    // Bangla
+    'bn-BD': 'bn-BD-NabanitaNeural',
+    'bn-IN': 'bn-IN-TanishaNeural',
+
+    // Bosnian
+    'bs-BA': 'bs-BA-GoranNeural',
+
+    // Catalan
+    'ca-ES': 'ca-ES-JoanaNeural',
+
+    // Czech
+    'cs-CZ': 'cs-CZ-AntoninNeural',
+
+    // Welsh
+    'cy-GB': 'cy-GB-AledNeural',
+
+    // Danish
+    'da-DK': 'da-DK-ChristelNeural',
+
+    // German
+    'de-AT': 'de-AT-IngridNeural',
+    'de-CH': 'de-CH-LeniNeural',
+    'de-DE': 'de-DE-KatjaNeural', // Giọng nữ
+    // 'de-DE': 'de-DE-ConradNeural', // Giọng nam
+
+    // Greek
+    'el-GR': 'el-GR-AthinaNeural',
+
+    // English
+    'en-AU': 'en-AU-NatashaNeural',
+    'en-CA': 'en-CA-ClaraNeural',
+    'en-GB': 'en-GB-LibbyNeural', // Giọng nữ
+    // 'en-GB': 'en-GB-RyanNeural', // Giọng nam
+    'en-HK': 'en-HK-YanNeural',
+    'en-IE': 'en-IE-ConnorNeural',
+    'en-IN': 'en-IN-NeerjaNeural',
+    'en-KE': 'en-KE-AsiliaNeural',
+    'en-NG': 'en-NG-AbeoNeural',
+    'en-NZ': 'en-NZ-MitchellNeural',
+    'en-PH': 'en-PH-JamesNeural',
+    'en-SG': 'en-SG-LunaNeural',
+    'en-TZ': 'en-TZ-ElimuNeural',
+    'en-US': 'en-US-JennyNeural', // Giọng nữ mặc định
+    // 'en-US': 'en-US-GuyNeural', // Giọng nam
+    // 'en-US': 'en-US-AriaNeural',
+    // 'en-US': 'en-US-DavisNeural',
+    'en-ZA': 'en-ZA-LeahNeural',
+
+    // Spanish
+    'es-AR': 'es-AR-ElenaNeural',
+    'es-BO': 'es-BO-MarceloNeural',
+    'es-CL': 'es-CL-LorenzoNeural',
+    'es-CO': 'es-CO-SalomeNeural',
+    'es-CR': 'es-CR-JuanNeural',
+    'es-CU': 'es-CU-ManuelNeural',
+    'es-DO': 'es-DO-EmilioNeural',
+    'es-EC': 'es-EC-AndreaNeural',
+    'es-ES': 'es-ES-ElviraNeural',
+    'es-GQ': 'es-GQ-TeresaNeural',
+    'es-GT': 'es-GT-AndresNeural',
+    'es-HN': 'es-HN-CarlosNeural',
+    'es-MX': 'es-MX-DaliaNeural',
+    'es-NI': 'es-NI-FedericoNeural',
+    'es-PA': 'es-PA-MargaritaNeural',
+    'es-PE': 'es-PE-AlexNeural',
+    'es-PR': 'es-PR-KarinaNeural',
+    'es-PY': 'es-PY-MarioNeural',
+    'es-SV': 'es-SV-LorenaNeural',
+    'es-US': 'es-US-AlonsoNeural',
+    'es-UY': 'es-UY-MateoNeural',
+    'es-VE': 'es-VE-PaolaNeural',
+
+    // Estonian
+    'et-EE': 'et-EE-AnuNeural',
+
+    // Basque
+    'eu-ES': 'eu-ES-AinhoaNeural',
+
+    // Persian (Farsi)
+    'fa-IR': 'fa-IR-DilaraNeural',
+
+    // Finnish
+    'fi-FI': 'fi-FI-SelmaNeural',
+
+    // Filipino
+    'fil-PH': 'fil-PH-BlessicaNeural',
+
+    // French
+    'fr-BE': 'fr-BE-CharlineNeural',
+    'fr-CA': 'fr-CA-SylvieNeural',
+    'fr-CH': 'fr-CH-ArianeNeural',
+    'fr-FR': 'fr-FR-DeniseNeural',
+
+    // Irish
+    'ga-IE': 'ga-IE-ColmNeural',
+
+    // Galician
+    'gl-ES': 'gl-ES-RoiNeural',
+
+    // Gujarati
+    'gu-IN': 'gu-IN-DhwaniNeural',
+
+    // Hebrew
+    'he-IL': 'he-IL-HilaNeural',
+
+    // Hindi
+    'hi-IN': 'hi-IN-SwaraNeural',
+
+    // Croatian
+    'hr-HR': 'hr-HR-GabrijelaNeural',
+
+    // Hungarian
+    'hu-HU': 'hu-HU-NoemiNeural',
+
+    // Armenian
+    'hy-AM': 'hy-AM-AnahitNeural',
+
+    // Indonesian
+    'id-ID': 'id-ID-GadisNeural',
+
+    // Icelandic
+    'is-IS': 'is-IS-GudrunNeural',
+
+    // Italian
+    'it-IT': 'it-IT-ElsaNeural',
+
+    // Japanese
+    'ja-JP': 'ja-JP-NanamiNeural',
+
+    // Javanese
+    'jv-ID': 'jv-ID-DimasNeural',
+
+    // Georgian
+    'ka-GE': 'ka-GE-EkaNeural',
+
+    // Kazakh
+    'kk-KZ': 'kk-KZ-AigulNeural',
+
+    // Khmer
+    'km-KH': 'km-KH-SreymomNeural',
+
+    // Kannada
+    'kn-IN': 'kn-IN-GaganNeural',
+
+    // Korean
+    'ko-KR': 'ko-KR-SunHiNeural',
+
+    // Lao
+    'lo-LA': 'lo-LA-KeomanyNeural',
+
+    // Lithuanian
+    'lt-LT': 'lt-LT-OnaNeural',
+
+    // Latvian
+    'lv-LV': 'lv-LV-EveritaNeural',
+
+    // Macedonian
+    'mk-MK': 'mk-MK-MarijaNeural',
+
+    // Malayalam
+    'ml-IN': 'ml-IN-MidhunNeural',
+
+    // Mongolian
+    'mn-MN': 'mn-MN-BataaNeural',
+
+    // Marathi
+    'mr-IN': 'mr-IN-AarohiNeural',
+
+    // Malay
+    'ms-MY': 'ms-MY-YasminNeural',
+
+    // Maltese
+    'mt-MT': 'mt-MT-GraceNeural',
+
+    // Burmese (Myanmar)
+    'my-MM': 'my-MM-NilarNeural',
+
+    // Norwegian (Bokmål)
+    'nb-NO': 'nb-NO-PernilleNeural',
+
+    // Nepali
+    'ne-NP': 'ne-NP-SagarNeural',
+
+    // Dutch
+    'nl-BE': 'nl-BE-DenaNeural',
+    'nl-NL': 'nl-NL-FennaNeural',
+
+    // Polish
+    'pl-PL': 'pl-PL-ZofiaNeural',
+
+    // Pashto
+    'ps-AF': 'ps-AF-GulNawazNeural',
+
+    // Portuguese
+    'pt-BR': 'pt-BR-FranciscaNeural',
+    'pt-PT': 'pt-PT-DuarteNeural',
+
+    // Romanian
+    'ro-RO': 'ro-RO-AlinaNeural',
+
+    // Russian
+    'ru-RU': 'ru-RU-SvetlanaNeural',
+
+    // Sinhala
+    'si-LK': 'si-LK-ThiliniNeural',
+
+    // Slovak
+    'sk-SK': 'sk-SK-LukasNeural',
+
+    // Slovenian
+    'sl-SI': 'sl-SI-PetraNeural',
+
+    // Somali
+    'so-SO': 'so-SO-UbaxNeural',
+
+    // Albanian
+    'sq-AL': 'sq-AL-AnilaNeural',
+
+    // Serbian
+    'sr-RS': 'sr-RS-SophieNeural',
+
+    // Sundanese
+    'su-ID': 'su-ID-JajangNeural',
+
+    // Swedish
+    'sv-SE': 'sv-SE-SofieNeural',
+
+    // Swahili
+    'sw-KE': 'sw-KE-ZuriNeural',
+    'sw-TZ': 'sw-TZ-DaudiNeural',
+
+    // Tamil
+    'ta-IN': 'ta-IN-PallaviNeural',
+    'ta-LK': 'ta-LK-KumarNeural',
+    'ta-MY': 'ta-MY-KaniNeural',
+    'ta-SG': 'ta-SG-AnbuNeural',
+
+    // Telugu
+    'te-IN': 'te-IN-ShrutiNeural',
+
+    // Thai
+    'th-TH': 'th-TH-PremwadeeNeural',
+
+    // Turkish
+    'tr-TR': 'tr-TR-EmelNeural',
+
+    // Ukrainian
+    'uk-UA': 'uk-UA-PolinaNeural',
+
+    // Urdu
+    'ur-IN': 'ur-IN-GulNeural',
+    'ur-PK': 'ur-PK-AsadNeural',
+
+    // Uzbek
+    'uz-UZ': 'uz-UZ-MadinaNeural',
+
+    // Vietnamese
+    'vi-VN': 'vi-VN-HoaiMyNeural', // Giọng nữ
+    // 'vi-VN': 'vi-VN-NamMinhNeural', // Giọng nam
+
+    // Chinese
+    'zh-CN': 'zh-CN-XiaoxiaoNeural',
+    'zh-CN-liaoning': 'zh-CN-liaoning-XiaobeiNeural',
+    'zh-CN-shaanxi': 'zh-CN-shaanxi-XiaoniNeural',
+    'zh-HK': 'zh-HK-HiuMaanNeural',
+    'zh-TW': 'zh-TW-HsiaoChenNeural',
+
+    // Zulu
+    'zu-ZA': 'zu-ZA-ThandoNeural',
+  };
+
+    // const langPrefix = langCode.split('-')[0].toLowerCase();
+    return voiceMap[langCode] || null;
 }
 
 /**
@@ -719,7 +1008,7 @@ io.on('connection', (socket) => {
         participants.forEach(p => {
             if (p.uid !== user.uid && p.translateCode) {
                 targetLanguages.add(p.translateCode);
-                voiceMappings[p.translateCode] = getVoiceNameForLanguage(p.translateCode);
+                voiceMappings[p.language] = getVoiceNameForLanguage(p.language);
             }
         });
         
@@ -790,8 +1079,9 @@ io.on('connection', (socket) => {
                 });
 
                 // console.log(`[${meetingId}] Sending translation to ${pUser.translateCode}: "${translatedText}"`);
+                console.log( "voiceName",voiceMappings[pUser.language]);
                 
-                textToSpeech(translatedText, pUser.translateCode, voiceMappings[pUser.translateCode])
+                textToSpeech(translatedText, pUser.translateCode, voiceMappings[pUser.language])
                     .then(audioBuffer => {
                         if (audioBuffer) {
                           // console.log("audioBuffer:", audioBuffer);
@@ -851,7 +1141,7 @@ io.on('connection', (socket) => {
 
       }
     } else {
-      console.warn(`Meeting ${meetingId} not found for user ${user.uid}`);
+      console.warn(`Meeting ${meetingId} not found for user`);
     }
   })
   // Handle disconnect
