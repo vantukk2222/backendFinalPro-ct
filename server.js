@@ -924,9 +924,9 @@ io.on('connection', (socket) => {
 
   // Handle message sending
   socket.on('send_message', async ({ chatId, senderId, message, memberIds }) => {
-    // console.log(`💬 New message in chat ${chatId} from ${senderId}`);
-    // console.log(`📝 Message: ${message}`);
-    // console.log(`👥 All members: ${memberIds?.join(', ')}`);
+    console.log(`💬 New message in chat ${chatId} from ${senderId}`);
+    console.log(`📝 Message: ${message}`);
+    console.log(`👥 All members: ${memberIds?.join(', ')}`);
     
     if (memberIds && Array.isArray(memberIds)) {
       const recipientIds = memberIds.filter(id => id !== senderId);
@@ -935,7 +935,7 @@ io.on('connection', (socket) => {
       if (recipientIds.length > 0) {
         await sendChatNotification(chatId, senderId, message, recipientIds);
       } else {
-        // console.log(`ℹ️ No recipients to send notifications to`);
+        console.log(`ℹ️ No recipients to send notifications to`);
       }
     } else {
       console.warn('❌ Invalid memberIds in send_message event');
